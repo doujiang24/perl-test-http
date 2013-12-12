@@ -9,8 +9,19 @@ use Test::LongString;
 
 use LWP::UserAgent;
 
-use URI::Escape;
 use Digest::MD5 qw(md5_hex);
+
+
+use Test::Http::Util qw(
+    bail_out
+    trim
+    aes_session_cookie
+    encode_args
+    expand_env_in_config
+    secure_token
+    join_arr
+    encode_cookies
+);
 
 our $test_dir = "t/";
 our $ServerName = "localhost";
@@ -23,7 +34,6 @@ our %depend_resp = ();
 our $UserAgent = LWP::UserAgent->new;
 $UserAgent->agent('Perl testing');
 
-sub join_arr(@);
 sub query_request($);
 
 our @EXPORT = qw(
@@ -50,20 +60,21 @@ sub server_port_for_client (@) {
     }
 }
 
-sub expand_env_in_config ($) {
-    my $config = shift;
+sub set_url($$$) {
+    my ($server_name, $uri, $gets) = @_;
 
-    if ( !defined $config ) {
-        return;
+    chomp( $server_name = $server_name ? $server_name : $ServerName );
+    my $get_data = encode_args(%$gets);
+
+    if ( index( $uri, "?" ) ge 0 ) {
+        $uri .= "&" . $get_data;
+    }
+    else {
+        $uri .= "?" . $get_data;
     }
 
-    $config =~ s/\$(TEST_HTTP_[_A-Z0-9]+)/
-        if (!defined $ENV{$1}) {
-            Test::More::BAIL_OUT "No environment $1 defined.\n";
-        }
-        $ENV{$1}/eg;
-
-    return $config;
+    my $url = "http://$server_name:$ServerPortForClient" . $uri;
+    return $url;
 }
 
 sub eval_str($) {
@@ -80,60 +91,6 @@ sub eval_str($) {
     return $_;
 }
 
-sub join_arr(@) {
-    my (%args) = @_;
-    my $str = "";
-    foreach my $key (sort keys %args) {
-        my $val = $args{$key};
-        if ( ref $val && ref $val eq 'ARRAY' ) {
-            $str .= "$key";
-            $str .= join_arr($val);
-        }
-        else {
-            $str .= "$key$val";
-        }
-    }
-    #warn $str;
-    return $str;
-}
-
-sub secure_token($@) {
-    my ($secret_key, %args) = @_;
-
-    $args{'t'} = time();
-
-    $args{'token'} = uc(md5_hex($secret_key. join_arr(%args) . $secret_key));
-
-    return %args;
-}
-
-sub encode_args(@) {
-    my (%args) = @_;
-    my @ret = ();
-
-    while ( my ($key, $val) = each %args ) {
-        push @ret, uri_escape($key) . "=" . uri_escape($val);
-    }
-
-    return join "&", @ret;
-}
-
-sub set_url($@) {
-    my ($uri, %gets) = @_;
-
-    my $get_data = encode_args(%gets);
-
-    if ( index( $uri, "?" ) ge 0 ) {
-        $uri .= "&" . $get_data;
-    }
-    else {
-        $uri .= "?" . $get_data;
-    }
-
-    my $url = "http://$ServerName:$ServerPortForClient" . $uri;
-    return $url;
-}
-
 sub parse_request($$) {
     my ($name, $rrequest) = @_;
 
@@ -146,6 +103,7 @@ sub parse_request($$) {
 
     $first =~ s/^\s+|\s+$//g;
     my ($method, $uri) = split /\s+/, $first, 2;
+    #warn $uri;
     $uri = eval_str($uri);
 
     my @rest_lines = <$in>;
@@ -158,6 +116,30 @@ sub parse_request($$) {
     return ( $method, $uri, %gets );
 }
 
+sub parse_cookies($) {
+    my $block = shift;
+
+    my %cookies = parse_data($block->cookies);
+
+    if ( !defined $block->user ) {
+        return %cookies;
+    }
+
+    open my $in, "<", \$block->user or die "can not open file";
+    my $line = <$in>;
+    close $in;
+
+    my ($sid, $uid, $expt) = split /\s+/, expand_env_in_config($line), 3;
+
+    my $user_cookie_key = $ENV{AES_COOKIE_KEY};
+    my $user_cookie_val = aes_session_cookie($sid, $uid, $expt, $block->aes_session_key, $block->aes_session_iv);
+
+    $cookies{$user_cookie_key} = $user_cookie_val;
+
+    return %cookies;
+}
+
+# always return hash
 sub parse_data($) {
     my ($file) = @_;
     my %data = ();
@@ -226,7 +208,7 @@ sub query_request($) {
             my %resp_data = ( 'resp' => $resp, 'json' => $json );
             $depend_resp{$i} = \%resp_data;
 
-        #warn 'debug';
+            #warn 'debug';
         }
 
         close $in;
@@ -246,11 +228,17 @@ sub query_request($) {
         }
     }
 
-    my $url = set_url($request_uri, %gets);
+    my $url = set_url($block->server_name, $request_uri, \%gets);
 
     my %headers = parse_data($block->more_headers);
     if ( %posts and ! $headers{'Content-Type'} ) {
         $headers{'Content-Type'} = 'application/x-www-form-urlencoded';
+    }
+
+    my %cookies = parse_cookies($block);
+    if (%cookies) {
+        $headers{'Cookie'} = encode_cookies(%cookies);
+        #warn encode_cookies(%cookies);
     }
 
     my $max_redirect = defined $block->max_redirect ? $block->max_redirect : 0;
@@ -258,15 +246,6 @@ sub query_request($) {
       http_curl( $request_method, $url, encode_args(%posts),
         $max_redirect, %headers );
     return $res;
-}
-
-sub trim ($) {
-    my $s = shift;
-    return undef if !defined $s;
-    $s =~ s/^\s+|\s+$//g;
-    $s =~ s/\n/ /gs;
-    $s =~ s/\s{2,}/ /gs;
-    $s;
 }
 
 sub check_resp($$) {
