@@ -8,10 +8,12 @@ request input config
 request
 ------------
 example:
+```perl
 --- request
 GET /pageview
 uid : 100
 foo : bar
+```
 
 result: http://servername/pageview?uid=100&foo=bar
 
