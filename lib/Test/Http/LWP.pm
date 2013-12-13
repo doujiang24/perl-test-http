@@ -4,10 +4,12 @@ use strict;
 use warnings;
 use JSON;
 
+use URI::Escape;
 use Test::Base -Base;
 use Test::LongString;
 
 use LWP::UserAgent;
+use Test::HTTP::Response;
 
 use Digest::MD5 qw(md5_hex);
 
@@ -21,6 +23,7 @@ use Test::Http::Util qw(
     secure_token
     join_arr
     encode_cookies
+    parse_body_json
 );
 
 our $test_dir = "t/";
@@ -30,6 +33,7 @@ our $NoLongString = undef;
 
 our %TestBlocksCache = ();
 our %depend_resp = ();
+our %empty_hash = ();
 
 our $UserAgent = LWP::UserAgent->new;
 $UserAgent->agent('Perl testing');
@@ -111,18 +115,29 @@ sub parse_request($$) {
 
     my $data = join("", @rest_lines);
     #warn $data;
-    my %gets = parse_data($data);
+    my $gets = parse_data($data);
 
-    return ( $method, $uri, %gets );
+    return ( $method, $uri, %$gets );
 }
 
 sub parse_cookies($) {
     my $block = shift;
 
-    my %cookies = parse_data($block->cookies);
+    my $cookies = parse_data($block->cookies);
+
+    if ( defined $block->depend_request ) {
+        while ( my($i, $resp_ref) = each %depend_resp ) {
+            my $cookies_ref = $resp_ref->{'cookies'};
+
+            while ( my ($k, $v) = each %$cookies_ref ) {
+                $k = uri_unescape($k);
+                $cookies->{$k} = uri_unescape($v->{'value'});
+            }
+        }
+    }
 
     if ( !defined $block->user ) {
-        return %cookies;
+        return %$cookies;
     }
 
     open my $in, "<", \$block->user or die "can not open file";
@@ -134,9 +149,9 @@ sub parse_cookies($) {
     my $user_cookie_key = $ENV{AES_COOKIE_KEY};
     my $user_cookie_val = aes_session_cookie($sid, $uid, $expt, $block->aes_session_key, $block->aes_session_iv);
 
-    $cookies{$user_cookie_key} = $user_cookie_val;
+    $cookies->{$user_cookie_key} = $user_cookie_val;
 
-    return %cookies;
+    return %$cookies;
 }
 
 # always return hash
@@ -145,7 +160,7 @@ sub parse_data($) {
     my %data = ();
 
     if ( ! defined $file ) {
-        return %data;
+        return \%data;
     }
 
     open my $in, "<", \$file or die "can not open file;";
@@ -156,7 +171,7 @@ sub parse_data($) {
         $data{$key} = eval_str($val);
     }
 
-    return %data;
+    return \%data;
 }
 
 sub http_curl($$$$@) {
@@ -193,19 +208,11 @@ sub query_request($) {
             my $block = $TestBlocksCache{$_};
             my $resp = query_request($block);
 
-            my %empty_hash = ();
-            my $json = \%empty_hash;
-
             my $content = $resp->content();
-            if ($content) {
-                $content =~ m/({.*})/;
+            my $json = parse_body_json($content);
 
-                if (defined $1) {
-                    $json = decode_json $1;
-                }
-            }
-
-            my %resp_data = ( 'resp' => $resp, 'json' => $json );
+            my $cookies = extract_cookies($resp) || \%empty_hash;
+            my %resp_data = ( 'resp' => $resp, 'json' => $json, 'cookies' => $cookies );
             $depend_resp{$i} = \%resp_data;
 
             #warn 'debug';
@@ -216,7 +223,7 @@ sub query_request($) {
 
     my ($request_method, $request_uri, %gets) = parse_request($name, \$block->request);
 
-    my %posts = parse_data($block->post_data);
+    my $posts = parse_data($block->post_data);
 
     if ( defined $block->secret_key) {
         chomp( my $secret_key = $block->secret_key );
@@ -224,27 +231,27 @@ sub query_request($) {
             %gets = secure_token($secret_key, %gets);
         }
         else {
-            %posts = secure_token($secret_key, %posts);
+            $posts = secure_token($secret_key, %$posts);
         }
     }
 
     my $url = set_url($block->server_name, $request_uri, \%gets);
 
-    my %headers = parse_data($block->more_headers);
-    if ( %posts and ! $headers{'Content-Type'} ) {
-        $headers{'Content-Type'} = 'application/x-www-form-urlencoded';
+    my $headers = parse_data($block->more_headers);
+    if ( $posts and ! $headers->{'Content-Type'} ) {
+        $headers->{'Content-Type'} = 'application/x-www-form-urlencoded';
     }
 
     my %cookies = parse_cookies($block);
     if (%cookies) {
-        $headers{'Cookie'} = encode_cookies(%cookies);
+        $headers->{'Cookie'} = encode_cookies(%cookies);
         #warn encode_cookies(%cookies);
     }
 
     my $max_redirect = defined $block->max_redirect ? $block->max_redirect : 0;
     my $res =
-      http_curl( $request_method, $url, encode_args(%posts),
-        $max_redirect, %headers );
+      http_curl( $request_method, $url, encode_args(%$posts),
+        $max_redirect, %$headers );
     return $res;
 }
 
@@ -262,8 +269,8 @@ sub check_resp($$) {
     }
 
     if ( defined $block->response_headers ) {
-        my %headers = parse_data( $block->response_headers );
-        while ( my ( $key, $val ) = each %headers ) {
+        my $headers = parse_data( $block->response_headers );
+        while ( my ( $key, $val ) = each %$headers ) {
             my $expected_val = $res->header($key);
             if ( !defined $expected_val ) {
                 $expected_val = '';
@@ -272,8 +279,8 @@ sub check_resp($$) {
         }
     }
     elsif ( defined $block->response_headers_like ) {
-        my %headers = parse_data( $block->response_headers_like );
-        while ( my ( $key, $val ) = each %headers ) {
+        my $headers = parse_data( $block->response_headers_like );
+        while ( my ( $key, $val ) = each %$headers ) {
             my $expected_val = $res->header($key);
             if ( !defined $expected_val ) {
                 $expected_val = '';
@@ -289,7 +296,7 @@ sub check_resp($$) {
         }
 
         $content =~ s/^Connection: TE, close\r\n//gms;
-        my $expected = $block->response_body;
+        chomp( my $expected = $block->response_body );
         $expected =~ s/\$ServerPortForClient\b/$ServerPortForClient/g;
 
         if ($NoLongString) {
@@ -307,12 +314,59 @@ sub check_resp($$) {
             $content =~ s/^TE: deflate,gzip;q=0\.3\r\n//gms;
         }
         $content =~ s/^Connection: TE, close\r\n//gms;
-        my $expected_pat = $block->response_body_like;
+        chomp( my $expected_pat = $block->response_body_like);
         $expected_pat =~ s/\$ServerPortForClient\b/$ServerPortForClient/g;
         my $summary = trim($content);
 
         like( $content, qr/$expected_pat/s,
             "$name - response_body_like - response is expected ($summary)" );
+    }
+
+    if ( defined $block->response_body_json ) {
+        my $resp_json = parse_body_json($res->content);
+        my $json = parse_data( $block->response_body_json );
+        while ( my ( $key, $val ) = each %$json ) {
+            my $expected_val = $resp_json->{$key};
+            if ( !defined $expected_val ) {
+                $expected_val = '';
+            }
+            is $expected_val, $val, "$name - body json $key ok";
+        }
+    }
+    elsif ( defined $block->response_body_json_like ) {
+        my $resp_json = parse_body_json($res->content);
+        my $json = parse_data( $block->response_body_json_like );
+        while ( my ( $key, $val ) = each %$json ) {
+            my $expected_val = $resp_json->{$key};
+            if ( !defined $expected_val ) {
+                $expected_val = '';
+            }
+            like $expected_val, qr/^$val$/, "$name - body json $key like ok";
+        }
+    }
+
+    my $resp_cookies_ref = extract_cookies($res) || \%empty_hash;
+    my %resp_cookies = %$resp_cookies_ref;
+
+    if ( defined $block->response_cookies ) {
+        my $cookies = parse_data( $block->response_cookies );
+        while ( my ( $key, $val ) = each %$cookies ) {
+            my $expected_val = $resp_cookies{$key}{'value'};
+            if ( !defined $expected_val ) {
+                $expected_val = '';
+            }
+            is $expected_val, $val, "$name - cookie $key ok";
+        }
+    }
+    elsif ( defined $block->response_cookies_like ) {
+        my $cookies = parse_data( $block->response_cookies_like );
+        while ( my ( $key, $val ) = each %$cookies ) {
+            my $expected_val = $resp_cookies{$key}{'value'};
+            if ( !defined $expected_val ) {
+                $expected_val = '';
+            }
+            like $expected_val, qr/^$val$/, "$name - cookie $key like ok";
+        }
     }
 }
 

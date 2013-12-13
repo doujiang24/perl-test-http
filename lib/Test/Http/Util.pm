@@ -11,6 +11,9 @@ use MIME::Base64;
 
 use Digest::MD5 qw(md5_hex);
 
+
+our %empty_hash =();
+
 sub join_arr(@);
 
 our @EXPORT_OK = qw (
@@ -22,15 +25,31 @@ our @EXPORT_OK = qw (
     secure_token
     join_arr
     encode_cookies
+    parse_body_json
 );
 
+sub parse_body_json($) {
+    my $content = shift;
+
+    my $json = \%empty_hash;
+
+    if ($content) {
+        $content =~ m/({.*})/;
+
+        if ( defined $1 ) {
+            $json = decode_json $1;
+        }
+    }
+
+    return $json;
+}
 
 sub encode_cookies(@) {
     my (%args) = @_;
     my @ret = ();
 
     while ( my ($key, $val) = each %args ) {
-        push @ret, uri_escape($key) . "=" . uri_escape($val);
+        push @ret, (uri_escape($key) . "=" . uri_escape($val));
     }
 
     return join "; ", @ret;
