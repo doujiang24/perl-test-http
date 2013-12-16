@@ -1,6 +1,6 @@
 # vim:set ft=perl ts=4 sw=4 et:
 
-use Test::Http::LWP @skip;
+use Test::Http::LWP;
 
 
 plan tests => 3 * blocks() + 1;
