@@ -2,6 +2,8 @@ Name
 ==============
 Test::HTTP - Testing modules for http api
 
+I was inspired by [test-nginx](https://github.com/agentzh/test-nginx), And The main code is copy from it, thanks agentzh
+
 
 Synopsis
 ==============
