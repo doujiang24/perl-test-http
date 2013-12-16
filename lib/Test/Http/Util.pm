@@ -26,7 +26,25 @@ our @EXPORT_OK = qw (
     join_arr
     encode_cookies
     parse_body_json
+    deep_hash_val
 );
+
+
+sub deep_hash_val($$) {
+    my ($hash, $keys) = @_;
+    my $val = undef;
+
+    foreach my $key (@$keys) {
+        $hash = $hash->{$key};
+        $val = $hash;
+
+        if ( !defined $hash || ref $hash ne "HASH" ) {
+            $hash = \%empty_hash;
+        }
+    }
+
+    return ref \$val eq "SCALAR" ? $val : "";
+}
 
 sub parse_body_json($) {
     my $content = shift;

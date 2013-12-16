@@ -24,6 +24,7 @@ use Test::Http::Util qw(
     join_arr
     encode_cookies
     parse_body_json
+    deep_hash_val
 );
 
 our $test_dir = "t/";
@@ -322,26 +323,30 @@ sub check_resp($$) {
             "$name - response_body_like - response is expected ($summary)" );
     }
 
-    if ( defined $block->response_body_json ) {
-        my $resp_json = parse_body_json($res->content);
-        my $json = parse_data( $block->response_body_json );
+    if (   defined $block->response_body_json
+        || defined $block->response_body_json_like )
+    {
+        my $resp_json = parse_body_json( $res->content );
+        my $json      = parse_data(
+            defined $block->response_body_json
+            ? $block->response_body_json
+            : $block->response_body_json_like );
+
         while ( my ( $key, $val ) = each %$json ) {
-            my $expected_val = $resp_json->{$key};
+            my @keys = split /\s*,\s*/, $key;
+            my $expected_val = deep_hash_val($resp_json, \@keys);
+
             if ( !defined $expected_val ) {
                 $expected_val = '';
             }
-            is $expected_val, $val, "$name - body json $key ok";
-        }
-    }
-    elsif ( defined $block->response_body_json_like ) {
-        my $resp_json = parse_body_json($res->content);
-        my $json = parse_data( $block->response_body_json_like );
-        while ( my ( $key, $val ) = each %$json ) {
-            my $expected_val = $resp_json->{$key};
-            if ( !defined $expected_val ) {
-                $expected_val = '';
+
+            if ( defined $block->response_body_json ) {
+                is $expected_val, $val, "$name - body json $key ok";
             }
-            like $expected_val, qr/^$val$/, "$name - body json $key like ok";
+            else {
+                like $expected_val, qr/^$val$/,
+                  "$name - body json $key like ok";
+            }
         }
     }
 

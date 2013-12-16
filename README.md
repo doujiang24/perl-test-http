@@ -51,7 +51,7 @@ the env variables that will auto replace the ```$TEST_HTTP_var_name```
 
 key => value data
 ------------
-we will use the key value type
+we mostly use this way to express key => value data
 ```
 foo: bar
 key : $TEST_HTTP_KEY
@@ -246,21 +246,24 @@ check the response http body
 
 this will json_decode the body first
 ```
-[callback]{"status":1, "data":"helloworld"}
+[callback]{"status":1,"data":{"uid":"helloworld"}}
 ```
 will decode to key => value
 ```
 {
     "status" => 1,
-    "data" => "helloworld",
+    "data" => (
+        "uid" => "helloworld",
+    ),
 }
 ```
 we can check the values specified by key
 
 ```
 --- response_body_json
-data : helloworld
+data,uid : helloworld
 ```
+```data, uid``` means ```$json_hash->{'data'}->{'uid'}```
 
 response_body_json_like
 ------------
@@ -270,4 +273,5 @@ check the http response body json
 See Also
 ==============
 <https://github.com/doujiang24/perl-test-http/tree/master/t>
+
 <http://uncledou.org/archives/50>
