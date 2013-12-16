@@ -29,11 +29,14 @@ Content-Type: text/html
 --- response_body_like
 .*?京ICP证030173号.*
 ```
+
 it will http request http://www.baidu.com/ with user-agent: Test::Http
+
 and check the http response:
-1. http status code = 200
-2. http header, Content-Type = "text/html"
-3. http body, like /^.*?京ICP证030173号.*$/
+
+    * http status code = 200
+    * http header, Content-Type = "text/html"
+    * http body, like /^.*?京ICP证030173号.*$/
 
 
 
