@@ -118,7 +118,7 @@ sub parse_request($$) {
     #warn $data;
     my $gets = parse_data($data);
 
-    return ( $method, $uri, %$gets );
+    return ( $method, $uri, $gets );
 }
 
 sub parse_cookies($) {
@@ -222,21 +222,21 @@ sub query_request($) {
         close $in;
     }
 
-    my ($request_method, $request_uri, %gets) = parse_request($name, \$block->request);
+    my ($request_method, $request_uri, $gets) = parse_request($name, \$block->request);
 
     my $posts = parse_data($block->post_data);
 
     if ( defined $block->secret_key) {
         chomp( my $secret_key = $block->secret_key );
         if ( $request_method eq "GET" ) {
-            %gets = secure_token($secret_key, %gets);
+            $gets = secure_token($secret_key, $gets);
         }
         else {
-            $posts = secure_token($secret_key, %$posts);
+            $posts = secure_token($secret_key, $posts);
         }
     }
 
-    my $url = set_url($block->server_name, $request_uri, \%gets);
+    my $url = set_url($block->server_name, $request_uri, $gets);
 
     my $headers = parse_data($block->more_headers);
     if ( $posts and ! $headers->{'Content-Type'} ) {

@@ -167,14 +167,14 @@ sub join_arr(@) {
     return $str;
 }
 
-sub secure_token($@) {
-    my ($secret_key, %args) = @_;
+sub secure_token($$) {
+    my ($secret_key, $args) = @_;
 
-    $args{'t'} = time();
+    $args->{'t'} = time();
 
-    $args{'token'} = uc(md5_hex($secret_key. join_arr(%args) . $secret_key));
+    $args->{'token'} = uc(md5_hex($secret_key. join_arr(%$args) . $secret_key));
 
-    return %args;
+    return $args;
 }
 
 1;
