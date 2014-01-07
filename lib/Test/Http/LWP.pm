@@ -226,18 +226,6 @@ sub query_request($) {
 
     my $posts = parse_data($block->post_data);
 
-    if ( defined $block->secret_key) {
-        chomp( my $secret_key = $block->secret_key );
-        if ( $request_method eq "GET" ) {
-            $gets = secure_token($secret_key, $gets);
-        }
-        else {
-            $posts = secure_token($secret_key, $posts);
-        }
-    }
-
-    my $url = set_url($block->server_name, $request_uri, $gets);
-
     my $headers = parse_data($block->more_headers);
     if ( $posts and ! $headers->{'Content-Type'} ) {
         $headers->{'Content-Type'} = 'application/x-www-form-urlencoded';
@@ -248,6 +236,18 @@ sub query_request($) {
         $headers->{'Cookie'} = encode_cookies(%cookies);
         #warn encode_cookies(%cookies);
     }
+
+    if ( defined $block->secret_key) {
+        chomp( my $secret_key = $block->secret_key );
+        if ( $request_method eq "GET" ) {
+            $headers->{'Access-Token'} = secure_token($secret_key, $gets);
+        }
+        else {
+            $headers->{'Access-Token'} = secure_token($secret_key, $posts);
+        }
+    }
+
+    my $url = set_url($block->server_name, $request_uri, $gets);
 
     my $max_redirect = defined $block->max_redirect ? $block->max_redirect : 0;
     my $res =
